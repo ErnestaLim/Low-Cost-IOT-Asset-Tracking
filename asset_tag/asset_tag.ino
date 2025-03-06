@@ -1,58 +1,34 @@
 #include <M5StickCPlus.h>
 #include <BLEDevice.h>
 #include <BLEUtils.h>
-#include <BLEScan.h>
+#include <BLEServer.h>
 
-// Same UUID as beacon
-#define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+// BLE Settings
+#define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b" // Same for both tags
+#define DEVICE_NAME "TAG1" // Change to "TAG2" for the second tag
 
-BLEScan* pBLEScan;
-int rssi = 0;
-bool beaconFound = false;
-
-// Scan callback to detect beacon
-class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
-  void onResult(BLEAdvertisedDevice advertisedDevice) {
-    if (advertisedDevice.haveServiceUUID() && 
-        advertisedDevice.getServiceUUID().toString() == SERVICE_UUID) {
-      rssi = advertisedDevice.getRSSI();
-      beaconFound = true;
-    }
-  }
-};
+BLEServer *pServer;
+BLEAdvertising *pAdvertising;
 
 void setup() {
   M5.begin();
   M5.Lcd.setRotation(3);
   M5.Lcd.fillScreen(BLACK);
   M5.Lcd.setTextSize(2);
-  M5.Lcd.println("Asset Tag");
+  M5.Lcd.printf("%s", DEVICE_NAME);
 
   // Initialize BLE
-  BLEDevice::init("");
-  pBLEScan = BLEDevice::getScan();
-  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-  pBLEScan->setActiveScan(true);
-  pBLEScan->setInterval(100);
-  pBLEScan->setWindow(99);
+  BLEDevice::init(DEVICE_NAME); // Unique name per tag
+  pServer = BLEDevice::createServer();
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  pService->start();
+
+  // Advertise with service UUID
+  pAdvertising = pServer->getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->start();
 }
 
 void loop() {
-  // Start BLE scan
-  BLEScanResults foundDevices = pBLEScan->start(1, false);
-  pBLEScan->clearResults();
-
-  // Update display
-  M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setCursor(0, 0);
-  M5.Lcd.setTextSize(2);
-  
-  if (beaconFound) {
-    M5.Lcd.printf("RSSI: %d dBm", rssi);
-    beaconFound = false;
-  } else {
-    M5.Lcd.println("No Beacon");
-  }
-
-  delay(2000);
+  delay(1000);
 }
