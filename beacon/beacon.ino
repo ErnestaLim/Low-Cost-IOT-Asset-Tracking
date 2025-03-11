@@ -2,13 +2,15 @@
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEScan.h>
+#include <BLEServer.h>
 
 // Same UUID as tags
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define DEVICE_NAME "BEACON1"
 
 BLEScan* pBLEScan;
-int rssiTag1 = 0, rssiTag2 = 0;
-bool tag1Found = false, tag2Found = false;
+int beacon2 = 0, rssiTag1 = 0, rssiTag2 = 0;
+bool tag1Found = false, tag2Found = false, beacon2Found = false;
 
 // Scan callback to detect tags
 class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
@@ -23,6 +25,8 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
         rssiTag2 = advertisedDevice.getRSSI();
         tag2Found = true;
       }
+      else if (name == "BEACON2")
+        rssiBeacon2 = advertisedDevice.getRSSI();
     }
   }
 };
@@ -41,6 +45,16 @@ void setup() {
   pBLEScan->setActiveScan(true);
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(99);
+
+  BLEDevice::init(DEVICE_NAME); // Unique name per tag
+  pServer = BLEDevice::createServer();
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  pService->start();
+  
+  // Advertise with service UUID
+  pAdvertising = pServer->getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->start();
 }
 
 void loop() {
@@ -56,6 +70,12 @@ void loop() {
   M5.Lcd.fillScreen(BLACK);
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.setTextSize(2);
+  M5.Lcd.print("BEACON2: ");
+  if (tag1Found) M5.Lcd.printf("%d", rssiBeacon2);
+  else M5.Lcd.print("---");
+
+  M5.Lcd.setCursor(0, 20);
+  M5.Lcd.setTextSize(2);
   M5.Lcd.print("TAG1: ");
   if (tag1Found) M5.Lcd.printf("%d", rssiTag1);
   else M5.Lcd.print("---");
@@ -65,5 +85,5 @@ void loop() {
   if (tag2Found) M5.Lcd.printf("%d", rssiTag2);
   else M5.Lcd.print("---");
 
-  delay(2000);
+  delay(500);
 }
