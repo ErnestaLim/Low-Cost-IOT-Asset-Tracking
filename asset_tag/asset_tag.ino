@@ -5,7 +5,7 @@
 
 // BLE Settings
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b" // Same for both tags
-#define DEVICE_NAME "TAG1" // Change to "TAG2" for the second tag
+#define DEVICE_NAME "TAG2" // Change to "TAG2" for the second tag
 
 BLEServer *pServer;
 BLEAdvertising *pAdvertising;
@@ -30,5 +30,5 @@ void setup() {
 }
 
 void loop() {
-  delay(1000);
+  delay(500);
 }

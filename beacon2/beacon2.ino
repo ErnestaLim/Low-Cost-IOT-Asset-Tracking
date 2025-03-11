@@ -6,11 +6,13 @@
 
 // Same UUID as tags
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define DEVICE_NAME "BEACON1"
+#define DEVICE_NAME "BEACON2"
 
+BLEServer *pServer;
+BLEAdvertising *pAdvertising;
 BLEScan* pBLEScan;
-int beacon2 = 0, rssiTag1 = 0, rssiTag2 = 0;
-bool tag1Found = false, tag2Found = false, beacon2Found = false;
+int rssiBeacon1 = 0, rssiTag1 = 0, rssiTag2 = 0;
+bool tag1Found = false, tag2Found = false, beacon1Found = false;
 
 // Scan callback to detect tags
 class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
@@ -25,8 +27,8 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
         rssiTag2 = advertisedDevice.getRSSI();
         tag2Found = true;
       }
-      else if (name == "BEACON2")
-        rssiBeacon2 = advertisedDevice.getRSSI();
+      else if (name == "BEACON1")
+        rssiBeacon1 = advertisedDevice.getRSSI();
     }
   }
 };
@@ -70,8 +72,8 @@ void loop() {
   M5.Lcd.fillScreen(BLACK);
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.setTextSize(2);
-  M5.Lcd.print("BEACON2: ");
-  if (tag1Found) M5.Lcd.printf("%d", rssiBeacon2);
+  M5.Lcd.print("BEACON1: ");
+  if (beacon1Found) M5.Lcd.printf("%d", rssiBeacon1);
   else M5.Lcd.print("---");
 
   M5.Lcd.setCursor(0, 20);
