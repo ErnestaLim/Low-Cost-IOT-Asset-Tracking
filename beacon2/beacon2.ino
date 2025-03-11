@@ -29,6 +29,7 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
       }
       else if (name == "BEACON1")
         rssiBeacon1 = advertisedDevice.getRSSI();
+        beacon1Found = true;
     }
   }
 };
@@ -86,6 +87,4 @@ void loop() {
   M5.Lcd.print("TAG2: ");
   if (tag2Found) M5.Lcd.printf("%d", rssiTag2);
   else M5.Lcd.print("---");
-
-  delay(500);
 }

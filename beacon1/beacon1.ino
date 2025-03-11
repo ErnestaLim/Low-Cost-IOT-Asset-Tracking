@@ -29,6 +29,7 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
       }
       else if (name == "BEACON2")
         rssiBeacon2 = advertisedDevice.getRSSI();
+        beacon2Found = true;
     }
   }
 };
@@ -41,14 +42,14 @@ void setup() {
   M5.Lcd.println("BEACON");
 
   // Initialize BLE
-  BLEDevice::init("");
+  BLEDevice::init(DEVICE_NAME); // Unique name per tag
+
   pBLEScan = BLEDevice::getScan();
   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
   pBLEScan->setActiveScan(true);
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(99);
 
-  BLEDevice::init(DEVICE_NAME); // Unique name per tag
   pServer = BLEDevice::createServer();
   BLEService *pService = pServer->createService(SERVICE_UUID);
   pService->start();
@@ -86,6 +87,4 @@ void loop() {
   M5.Lcd.print("TAG2: ");
   if (tag2Found) M5.Lcd.printf("%d", rssiTag2);
   else M5.Lcd.print("---");
-
-  delay(500);
 }
