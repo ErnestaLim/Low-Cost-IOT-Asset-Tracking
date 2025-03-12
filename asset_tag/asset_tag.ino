@@ -27,8 +27,11 @@ void setup() {
   pAdvertising = pServer->getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->start();
+
+  // Set advertising interval - each unit is 0.625nanosecond
+  pAdvertising->setMinInterval(0x640); // 1second
+  pAdvertising->setMaxInterval(0x640); // 1second
 }
 
-void loop() {
-  delay(500);
+void loop(){
 }
