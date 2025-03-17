@@ -1,117 +1,151 @@
 #include <M5StickCPlus.h>
 #include <BLEDevice.h>
-#include <BLEUtils.h>
 #include <BLEScan.h>
 #include <BLEServer.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
 
-// Same UUID as tags
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define DEVICE_NAME "BEACON3"
+#define BEACON_NAME "BEACON2" // Change this per beacon
+
+const char* ssid = "Yes";
+const char* password = "B9503#9v";
+const char* mqtt_server = "192.168.20.175";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 BLEServer *pServer;
 BLEAdvertising *pAdvertising;
 BLEScan* pBLEScan;
-int rssiBeacon1 = 0, rssiBeacon2 = 0, rssiBeacon3 = 0, rssiTag1 = 0, rssiTag2 = 0;
-bool tag1Found = false, tag2Found = false, beacon1Found = false, beacon2Found = false, beacon3Found = false;
 
-// Scan callback to detect tags
+const char* beaconNames[] = {"BEACON1", "BEACON2", "BEACON3"};
+const char* tagName = "TAG";
+
+// Store distances dynamically
+int rssi[3] = {0, 0, 0};
+float distances[3] = {0, 0, 0};
+bool beaconFound[3] = {false, false, false};
+int tagRssi = 0;
+float tagDistance = 0;
+bool tagFound = false;
+
+// RSSI Path Loss Model Parameters
+float Pr = -69;  // RSSI at 1m
+float N = 4.4;   // Path Loss Exponent
+
+float rssiToDistance(int rssi) {
+    return pow(10, (Pr - rssi) / (10 * N));
+}
+
+void sendMQTT(const char* object, float value) {
+    char msg[50];
+    snprintf(msg, 50, "%s:%.2f", object, value);
+    Serial.println(msg);
+    client.publish(BEACON_NAME, msg);
+}
+
+// **BLE Scan Callback**
 class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
-  void onResult(BLEAdvertisedDevice advertisedDevice) {;
-    if (advertisedDevice.haveServiceUUID() && 
-        advertisedDevice.getServiceUUID().toString() == SERVICE_UUID &&
-        advertisedDevice.getName().c_str() != DEVICE_NAME) {
-      Serial.print("Found device: ");
-      Serial.println(advertisedDevice.getName().c_str());
-      String name = advertisedDevice.getName().c_str();
-      if (name == "TAG1") {
-        rssiTag1 = advertisedDevice.getRSSI();
-        tag1Found = true;
-      } else if (name == "TAG2") {
-        rssiTag2 = advertisedDevice.getRSSI();
-        tag2Found = true;
-      } else if (name == "BEACON1"){
-        rssiBeacon1 = advertisedDevice.getRSSI();
-        beacon1Found = true;
-      } else if (name == "BEACON2"){
-        rssiBeacon2 = advertisedDevice.getRSSI();
-        beacon2Found = true;
-      } else if (name == "BEACON3"){
-        rssiBeacon3 = advertisedDevice.getRSSI();
-        beacon3Found = true;
-      }
+    void onResult(BLEAdvertisedDevice advertisedDevice) {
+        String name = advertisedDevice.getName().c_str();
+        int signal = advertisedDevice.getRSSI();
+        if (advertisedDevice.haveServiceUUID() && advertisedDevice.getServiceUUID().toString() == SERVICE_UUID) {
+          for (int i = 0; i < 3; i++) {
+              if (name == beaconNames[i] && name != BEACON_NAME) {
+                  rssi[i] = signal;
+                  distances[i] = rssiToDistance(signal);
+                  beaconFound[i] = true;
+              }
+          }
+
+          if (name == tagName) {
+              tagRssi = signal;
+              tagDistance = rssiToDistance(signal);
+              tagFound = true;
+          }
+        }
     }
-  }
 };
 
+void connectWiFi() {
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("WiFi connected");
+}
+
+void reconnectMQTT() {
+    while (!client.connected()) {
+        if (client.connect(BEACON_NAME)) {
+            Serial.println("MQTT Connected");
+        } else {
+            delay(5000);
+        }
+    }
+}
+
 void setup() {
-  M5.begin();
-  M5.Lcd.setRotation(3);
-  M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setTextSize(2);
-  M5.Lcd.println(DEVICE_NAME);
+    M5.begin();
+    M5.Lcd.setRotation(3);
+    M5.Lcd.fillScreen(BLACK);
+    M5.Lcd.setTextSize(2);
+    M5.Lcd.printf("%s", BEACON_NAME);
+    Serial.begin(115200);
+    
+    connectWiFi();
+    client.setServer(mqtt_server, 1883);
 
-  // Initialize BLE
-  BLEDevice::init(DEVICE_NAME); // Unique name per tag
+    BLEDevice::init(BEACON_NAME);
+    pBLEScan = BLEDevice::getScan();
+    pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks(), true);
+    pBLEScan->setActiveScan(true);
 
-  pBLEScan = BLEDevice::getScan();
-  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks(),true);
-  pBLEScan->setActiveScan(true);
-
-  pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  pService->start();
-  
-  // Advertise with service UUID
-  pAdvertising = pServer->getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->start();
-  // Set advertising interval - each unit is 0.625nanosecond
-  pAdvertising->setMinInterval(0x640); // 1second
-  pAdvertising->setMaxInterval(0x640); // 1second
-
+    pServer = BLEDevice::createServer();
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+    pService->start();
+    
+    // Advertise with service UUID
+    pAdvertising = pServer->getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->start();
+    // Set advertising interval - each unit is 0.625nanosecond
+    pAdvertising->setMinInterval(0x640); // 1second
+    pAdvertising->setMaxInterval(0x640); // 1second
 }
 
 void loop() {
-  // Reset flags
-  tag1Found = false;
-  tag2Found = false;
-  beacon1Found = false;
-  beacon2Found = false;
-  beacon3Found = false;
+    if (!client.connected()) {
+        reconnectMQTT();
+    }
+    client.loop();
+    int pos = 20;
+    tagFound = false;
+    for (int i = 0; i < 3; i++) beaconFound[i] = false;
 
-  // Scan for 1 second
-  pBLEScan->clearResults();
-  Serial.println("Clear");
-  Serial.println("");
-  pBLEScan->start(1, false);
-  // Update display
-  M5.Lcd.setCursor(0, 0);
-  M5.Lcd.setTextSize(2);
-  M5.Lcd.print("BEACON1:");
-  if (beacon1Found) M5.Lcd.printf("%d", rssiBeacon1);
-  else M5.Lcd.print("---");
+    pBLEScan->clearResults();
+    pBLEScan->start(1, false);
+    for (int i = 0; i < 3; i++) {
+      if(beaconFound[i]){
+        M5.Lcd.setCursor(0,pos);
+        M5.Lcd.setTextSize(2);
+        M5.Lcd.print(beaconNames[i]);
+        M5.Lcd.printf(":%d", rssi[i]);
+        M5.Lcd.printf(",%.2f", distances[i]);
+        sendMQTT(beaconNames[i], distances[i]);
+        pos += 20;
+      }
+    }
+    if (tagFound){
+      M5.Lcd.setCursor(0,60);
+      M5.Lcd.setTextSize(2);
+      M5.Lcd.print(tagName);
+      M5.Lcd.printf(":%d", tagRssi);
+      M5.Lcd.printf(",%.2f", tagDistance);
+      sendMQTT("TAG", tagDistance);
+    }
 
-  M5.Lcd.setCursor(0, 20);
-  M5.Lcd.setTextSize(2);
-  M5.Lcd.print("BEACON2:");
-  if (beacon2Found) M5.Lcd.printf("%d", rssiBeacon2);
-  else M5.Lcd.print("---");
-
-  M5.Lcd.setCursor(0,40);
-  M5.Lcd.setTextSize(2);
-  M5.Lcd.print("BEACON3:");
-  if (beacon3Found) M5.Lcd.printf("%d", rssiBeacon3);
-  else M5.Lcd.print("---");
-
-  M5.Lcd.setCursor(0, 60);
-  M5.Lcd.setTextSize(2);
-  M5.Lcd.print("TAG1: ");
-  if (tag1Found) M5.Lcd.printf("%d", rssiTag1);
-  else M5.Lcd.print("---");
-  
-  M5.Lcd.setCursor(0, 80);
-  M5.Lcd.print("TAG2: ");
-  if (tag2Found) M5.Lcd.printf("%d", rssiTag2);
-  else M5.Lcd.print("---");
-  delay(100);
+    delay(1000);
 }
