@@ -9,8 +9,8 @@ TAG_TOPIC = "TAG_POSITION"
 # Predefined beacon positions (adjust as needed)
 beacon_positions = {
     "BEACON1": (0, 0),
-    "BEACON2": (1, 0),
-    "BEACON3": (0, 1)
+    "BEACON2": (0, 0),
+    "BEACON3": (0, 0)
 }
 
 # Dictionary to store distances
@@ -48,6 +48,22 @@ def trilateration(beacon_positions, distances):
     except np.linalg.LinAlgError:
         return None
 
+def averaged_distances():
+    # Calculate average distance between BEACON1 and BEACON2
+    avg_dist = (rssi_data["BEACON1"]["BEACON2"] + rssi_data["BEACON2"]["BEACON1"]) / 2
+    beacon_positions["BEACON2"] = (avg_dist, 0)
+    # beacon_positions["BEACON2"] = (rssi_data["BEACON1"]["BEACON2"], 0)
+    # Calculate average distance between BEACON1 and BEACON3
+    avg_dist = (rssi_data["BEACON1"]["BEACON3"] + rssi_data["BEACON3"]["BEACON1"]) / 2
+    beacon_positions["BEACON3"] = (0, avg_dist)
+    # beacon_positions["BEACON3"] = (0,rssi_data["BEACON1"]["BEACON3"])
+
+def print_beacon_positions():
+    """Prints the current beacon positions."""
+    print("Current Beacon Positions:")
+    for beacon, position in beacon_positions.items():
+        print(f"  {beacon}: X={position[0]:.2f}, Y={position[1]:.2f}")
+
 
 def on_message(client, userdata, msg):
     """
@@ -65,16 +81,17 @@ def on_message(client, userdata, msg):
         if source in rssi_data:
             rssi_data[source][target] = distance
             # print("added data")
-        
-        # If all beacons have distance to TAG, compute position
-        if "TAG" in rssi_data["BEACON1"] and "TAG" in rssi_data["BEACON2"] and "TAG" in rssi_data["BEACON3"]:
-            tag_distances = {b: rssi_data[b]["TAG"] for b in beacon_positions if "TAG" in rssi_data[b]}
-            tag_position = trilateration(beacon_positions, tag_distances)
-            
-            if tag_position:
-                x, y = tag_position
-                print(f"Estimated Tag Position: X={x:.2f}, Y={y:.2f}")
-                client.publish(TAG_TOPIC, f"{x:.2f},{y:.2f}")
+        if "BEACON2" in rssi_data["BEACON1"] and "BEACON1" in rssi_data["BEACON2"] and "BEACON3" in rssi_data["BEACON1"] and "BEACON1" in rssi_data["BEACON3"]:
+            averaged_distances()
+            # If all beacons have distance to TAG, compute position
+            if "TAG" in rssi_data["BEACON1"] and "TAG" in rssi_data["BEACON2"] and "TAG" in rssi_data["BEACON3"]:
+                tag_distances = {b: rssi_data[b]["TAG"] for b in beacon_positions if "TAG" in rssi_data[b]}
+                tag_position = trilateration(beacon_positions, tag_distances)
+                if tag_position:
+                    x, y = tag_position
+                    print_beacon_positions()
+                    print(f"Estimated Tag Position: X={x:.2f}, Y={y:.2f}")
+                    # client.publish(TAG_TOPIC, f"{x:.2f},{y:.2f}")
 
     except ValueError:
         print("Invalid message format.")
