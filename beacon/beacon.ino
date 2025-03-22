@@ -6,7 +6,10 @@
 #include <PubSubClient.h>
 
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define BEACON_NAME "BEACON2" // Change this per beacon
+#define BEACON_NAME "BEACON1" // Change this per beacon
+
+const char* beaconSSID = "BeaconNetwork";
+const char* beaconPassword = "B9503#9v";
 
 const char* ssid = "Yes";
 const char* password = "B9503#9v";
@@ -19,13 +22,13 @@ BLEServer *pServer;
 BLEAdvertising *pAdvertising;
 BLEScan* pBLEScan;
 
-const char* beaconNames[] = {"BEACON1", "BEACON2", "BEACON3"};
+const char* beaconNames[] = {"BEACON1", "BEACON2", "BEACON3", "BEACON4"};
 const char* tagName = "TAG";
 
 // Store distances dynamically
-int rssi[3] = {0, 0, 0};
-float distances[3] = {0, 0, 0};
-bool beaconFound[3] = {false, false, false};
+int rssi[4] = {0, 0, 0, 0};
+float distances[4] = {0, 0, 0, 0};
+bool beaconFound[4] = {false, false, false, false};
 int tagRssi = 0;
 float tagDistance = 0;
 bool tagFound = false;
@@ -51,7 +54,7 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
         String name = advertisedDevice.getName().c_str();
         int signal = advertisedDevice.getRSSI();
         if (advertisedDevice.haveServiceUUID() && advertisedDevice.getServiceUUID().toString() == SERVICE_UUID) {
-          for (int i = 0; i < 3; i++) {
+          for (int i = 0; i < 4; i++) {
               if (name == beaconNames[i] && name != BEACON_NAME) {
                   rssi[i] = signal;
                   distances[i] = rssiToDistance(signal);
@@ -98,6 +101,14 @@ void setup() {
     connectWiFi();
     client.setServer(mqtt_server, 1883);
 
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP(beaconSSID, beaconPassword);
+
+    Serial.print("Beacon AP started: ");
+    Serial.println(beaconSSID);
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.softAPIP());
+
     BLEDevice::init(BEACON_NAME);
     pBLEScan = BLEDevice::getScan();
     pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks(), true);
@@ -123,11 +134,11 @@ void loop() {
     client.loop();
     int pos = 20;
     tagFound = false;
-    for (int i = 0; i < 3; i++) beaconFound[i] = false;
+    for (int i = 0; i < 4; i++) beaconFound[i] = false;
 
     pBLEScan->clearResults();
     pBLEScan->start(1, false);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
       if(beaconFound[i]){
         M5.Lcd.setCursor(0,pos);
         M5.Lcd.setTextSize(2);
@@ -139,7 +150,7 @@ void loop() {
       }
     }
     if (tagFound){
-      M5.Lcd.setCursor(0,60);
+      M5.Lcd.setCursor(0,80);
       M5.Lcd.setTextSize(2);
       M5.Lcd.print(tagName);
       M5.Lcd.printf(":%d", tagRssi);
