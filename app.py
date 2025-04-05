@@ -2,8 +2,8 @@
 from flask import Flask, render_template, Response, jsonify
 from threading import Thread
 import time
-# from mqtt.client import start_mqtt, position_queue  # import shared queue
-from mqtt.simulator import simulate_dummy_data, position_queue, wifi_positions
+from mqtt.client import start_mqtt, position_queue  # import shared queue
+from mqtt.simulator import handle_mqtt_position_updates, position_queue, wifi_positions
 from mqtt.simulator import get_beacon_positions
 
 app = Flask(__name__)
@@ -42,8 +42,8 @@ def get_wifi():
 
 if __name__ == "__main__":
     # Start MQTT listener in a background thread
-    # Thread(target=start_mqtt, daemon=True).start()
-    Thread(target=simulate_dummy_data, daemon=True).start()
+    Thread(target=start_mqtt, daemon=True).start()
+    Thread(target=handle_mqtt_position_updates, daemon=True).start()
 
     # Start update loop to sync queue to variable
     Thread(target=update_position, daemon=True).start()
