@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IoT Asset Tracker</title>
     <style>
+      /* (same styles as before, keeping it clean and responsive) */
       * {
         box-sizing: border-box;
         margin: 0;
@@ -37,7 +38,7 @@
         flex-direction: column;
       }
       .tag-card {
-        background-color: #fdfdfd;
+        background: #fdfdfd;
         border: 1px solid #e5e5e5;
         border-radius: 14px;
         padding: 16px 18px;
@@ -49,26 +50,22 @@
         flex-direction: column;
         gap: 6px;
       }
-
       .tag-card:hover {
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
         transform: translateY(-2px);
-        background-color: #ffffff;
+        background: #fff;
       }
-
       .tag-card .tag-id {
         font-weight: 600;
         font-size: 16px;
         color: #111;
         margin-bottom: 4px;
       }
-
       .tag-card .coord-label {
         font-size: 13px;
         font-weight: 500;
         color: #888;
       }
-
       .tag-card .coord-value {
         font-size: 14px;
         color: #333;
@@ -90,7 +87,6 @@
         transition: background 0.2s ease;
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
       }
-
       #reset-button:hover {
         background: #005fd1;
       }
@@ -105,45 +101,68 @@
       }
     </style>
   </head>
+
   <body>
     <div id="graph-container">
       <canvas id="canvas-grid"></canvas>
       <div id="tooltip" class="tooltip" style="display: none"></div>
     </div>
+
     <div id="tag-list">
-      <!-- Cards will be injected here -->
       <button id="reset-button">Reset View</button>
     </div>
 
     <script>
       const canvas = document.getElementById("canvas-grid");
       const ctx = canvas.getContext("2d");
-      canvas.width = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
 
-      let scale = 100;
+      let baseScale = 100;
+      let scale = baseScale;
+      let targetScale = baseScale;
       let originX = canvas.width / 2;
       let originY = canvas.height / 2;
+      let targetOriginX = originX;
+      let targetOriginY = originY;
+      let smoothFocusSpeed = 0.1;
+      let zoomAnimationActive = false;
+      let zoomAnimationProgress = 0;
+      let zoomState = "idle"; // "idle", "zoomed-in", "zooming-out"
+      let zoomedInTimeout = null;
+
+      let dashOffset = 0;
+
       let isDragging = false;
       let dragStart = { x: 0, y: 0 };
       let selectedTag = null;
       let beaconPositions = {};
+      let wifiPositions = {};
       const tags = {};
       const tooltip = document.getElementById("tooltip");
       let hasFittedOnce = false;
 
-      function worldToCanvas(x, y) {
-        return {
-          x: originX + x * scale,
-          y: originY - y * scale,
-        };
+      function resizeCanvas() {
+        const oldWidth = canvas.width;
+        const oldHeight = canvas.height;
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+
+        // Recenter when resizing
+        const centerX = oldWidth / 2;
+        const centerY = oldHeight / 2;
+        originX = canvas.width / 2 - (centerX - originX);
+        originY = canvas.height / 2 - (centerY - originY);
+        targetOriginX = originX;
+        targetOriginY = originY;
       }
 
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      function worldToCanvas(x, y) {
+        return { x: originX + x * scale, y: originY - y * scale };
+      }
       function canvasToWorld(x, y) {
-        return {
-          x: (x - originX) / scale,
-          y: (originY - y) / scale,
-        };
+        return { x: (x - originX) / scale, y: (originY - y) / scale };
       }
 
       canvas.addEventListener("mousedown", (e) => {
@@ -151,20 +170,19 @@
         dragStart = { x: e.offsetX, y: e.offsetY };
         canvas.style.cursor = "grabbing";
       });
-
       canvas.addEventListener("mouseup", () => {
         isDragging = false;
         canvas.style.cursor = "grab";
       });
-
       canvas.addEventListener("mousemove", (e) => {
         if (isDragging) {
           originX += e.offsetX - dragStart.x;
           originY += e.offsetY - dragStart.y;
+          targetOriginX = originX;
+          targetOriginY = originY;
           dragStart = { x: e.offsetX, y: e.offsetY };
         }
       });
-
       canvas.addEventListener("wheel", (e) => {
         e.preventDefault();
         const zoom = e.deltaY < 0 ? 1.1 : 0.9;
@@ -172,6 +190,13 @@
         scale *= zoom;
         originX = e.offsetX - mouse.x * scale;
         originY = e.offsetY + mouse.y * scale;
+        targetScale = scale;
+        targetOriginX = originX;
+        targetOriginY = originY;
+      });
+
+      document.getElementById("reset-button").addEventListener("click", () => {
+        fitToBeacons();
       });
 
       canvas.addEventListener("click", (e) => {
@@ -189,10 +214,6 @@
         }
       });
 
-      document.getElementById("reset-button").addEventListener("click", () => {
-        fitToBeacons();
-      });
-
       function showTooltip(id, t) {
         const { x, y } = worldToCanvas(t.x, t.y);
         tooltip.style.left = `${x + 10}px`;
@@ -204,30 +225,8 @@
 
       function highlightCard(tagId) {
         document.querySelectorAll(".tag-card").forEach((card) => {
-          card.classList.toggle("highlight", card.dataset.id === tagId);
-        });
-      }
-
-      function renderTagList() {
-        const list = document.getElementById("tag-list");
-        list.querySelectorAll(".tag-card").forEach((e) => e.remove());
-        Object.entries(tags).forEach(([id, t]) => {
-          const div = document.createElement("div");
-          div.className = "tag-card";
-          div.dataset.id = id;
-          div.innerHTML = `
-            <div class="tag-id">${id}</div>
-            <div><span class="coord-label">X</span>: <span class="coord-value">${t.x}</span></div>
-            <div><span class="coord-label">Y</span>: <span class="coord-value">${t.y}</span></div>
-            <div><span class="coord-label">Z</span>: <span class="coord-value">${t.z}</span></div>
-            `;
-          div.onclick = () => {
-            selectedTag = id;
-            focusOnTag(id);
-            showTooltip(id, t);
-            highlightCard(id);
-          };
-          list.insertBefore(div, document.getElementById("reset-button"));
+          if (card.dataset.id === tagId) card.classList.add("highlight");
+          else card.classList.remove("highlight");
         });
       }
 
@@ -241,21 +240,61 @@
         const padding = 1;
         const roomWidth = maxX - minX + padding * 2;
         const roomHeight = maxY - minY + padding * 2;
-
-        scale = Math.min(canvas.width / roomWidth, canvas.height / roomHeight);
+        baseScale = Math.min(
+          canvas.width / roomWidth,
+          canvas.height / roomHeight
+        );
+        scale = baseScale;
+        targetScale = baseScale;
         originX = canvas.width / 2 - ((minX + maxX) / 2) * scale;
         originY = canvas.height / 2 + ((minY + maxY) / 2) * scale;
+        targetOriginX = originX;
+        targetOriginY = originY;
       }
 
       function focusOnTag(id) {
         const tag = tags[id];
         if (!tag) return;
-        originX = canvas.width / 2 - tag.x * scale;
-        originY = canvas.height / 2 + tag.y * scale;
+
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        targetOriginX = centerX - tag.x * scale;
+        targetOriginY = centerY + tag.y * scale;
+
+        zoomState = "zoomed-in";
+        scale = baseScale * 1.1; // instantly zoom in 10%
+        targetScale = scale;
+
+        clearTimeout(zoomedInTimeout);
+        zoomedInTimeout = setTimeout(() => {
+          zoomState = "zooming-out";
+        }, 1500); // wait 1.5 seconds before zooming out slowly
       }
 
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Smooth panning
+        originX += (targetOriginX - originX) * smoothFocusSpeed;
+        originY += (targetOriginY - originY) * smoothFocusSpeed;
+
+        if (zoomState === "zooming-out") {
+          const driftSpeed = 0.003; // Very gentle slow drift
+          const oldScale = scale;
+          scale += (baseScale - scale) * driftSpeed;
+
+          const centerX = canvas.width / 2;
+          const centerY = canvas.height / 2;
+          originX = centerX - (centerX - originX) * (scale / oldScale);
+          originY = centerY - (centerY - originY) * (scale / oldScale);
+
+          if (Math.abs(scale - baseScale) < 0.5) {
+            zoomState = "idle";
+            scale = baseScale;
+            targetScale = baseScale;
+          }
+        }
+
         ctx.strokeStyle = "#ddd";
         const step = scale;
         for (let x = originX % step; x < canvas.width; x += step) {
@@ -271,7 +310,7 @@
           ctx.stroke();
         }
 
-        // Beacons
+        // Draw BLE beacons
         ctx.fillStyle = "#e74c3c";
         for (const [id, b] of Object.entries(beaconPositions)) {
           const { x, y } = worldToCanvas(b[0], b[1]);
@@ -281,7 +320,17 @@
           ctx.fillText(id, x + 8, y - 8);
         }
 
-        // Tags
+        // Draw WiFi beacons
+        ctx.fillStyle = "#9b59b6";
+        for (const [id, b] of Object.entries(wifiPositions)) {
+          const { x, y } = worldToCanvas(b[0], b[1]);
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.fillText(id, x + 8, y - 8);
+        }
+
+        // Draw tags
         for (const [id, t] of Object.entries(tags)) {
           const { x, y } = worldToCanvas(t.x, t.y);
           ctx.beginPath();
@@ -293,46 +342,122 @@
           ctx.fillText(id, x + 10, y - 10);
         }
 
-        window.addEventListener("resize", () => {
-          const oldWidth = canvas.width;
-          const oldHeight = canvas.height;
-          const newWidth = canvas.offsetWidth;
-          const newHeight = canvas.offsetHeight;
+        // Draw animated dashed lines to WiFi and BLE
+        if (selectedTag && tags[selectedTag]) {
+          const t = tags[selectedTag];
+          const tagPos = worldToCanvas(t.x, t.y);
 
-          // Adjust origin based on how much the canvas grew/shrank
-          originX += (newWidth - oldWidth) / 2;
-          originY += (newHeight - oldHeight) / 2;
+          // Line to WiFi
+          if (t.closest_wifi_mac && wifiPositions[t.closest_wifi_mac]) {
+            const wifiPos = worldToCanvas(
+              wifiPositions[t.closest_wifi_mac][0],
+              wifiPositions[t.closest_wifi_mac][1]
+            );
 
-          canvas.width = newWidth;
-          canvas.height = newHeight;
-        });
+            ctx.beginPath();
+            ctx.setLineDash([5, 5]);
+            ctx.lineDashOffset = -dashOffset;
+            ctx.moveTo(tagPos.x, tagPos.y);
+            ctx.lineTo(wifiPos.x, wifiPos.y);
+            ctx.strokeStyle = "#9b59b6"; // purple line for WiFi
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
 
+          // Line to BLE beacon
+          if (t.closest_ble_mac && beaconPositions[t.closest_ble_mac]) {
+            const blePos = worldToCanvas(
+              beaconPositions[t.closest_ble_mac][0],
+              beaconPositions[t.closest_ble_mac][1]
+            );
+
+            ctx.beginPath();
+            ctx.setLineDash([5, 5]);
+            ctx.lineDashOffset = -dashOffset;
+            ctx.moveTo(tagPos.x, tagPos.y);
+            ctx.lineTo(blePos.x, blePos.y);
+            ctx.strokeStyle = "#f39c12"; // 🟠 orange for BLE
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+
+        dashOffset += 0.3; // 🔥 animate the dashed line
         requestAnimationFrame(draw);
       }
 
       async function fetchData() {
-        const beaconRes = await fetch("/beacons");
-        beaconPositions = await beaconRes.json();
-
-        if (!hasFittedOnce && Object.keys(beaconPositions).length > 0) {
-          fitToBeacons();
-          hasFittedOnce = true;
+        if (!hasFittedOnce) {
+          const beaconRes = await fetch("/beacons");
+          beaconPositions = await beaconRes.json();
+          const wifiRes = await fetch("/wifi");
+          wifiPositions = await wifiRes.json();
+          if (Object.keys(beaconPositions).length > 0) {
+            fitToBeacons();
+            hasFittedOnce = true;
+          }
         }
 
         const res = await fetch("/positions");
         const data = await res.json();
 
         data.forEach((p) => {
-          tags[p.id] = { x: p.x, y: p.y, z: p.z };
+          tags[p.id] = {
+            x: p.x,
+            y: p.y,
+            z: p.z,
+            closest_wifi_mac: p.closest_wifi_mac,
+            closest_wifi_distance: p.closest_wifi_distance,
+            closest_ble_mac: p.closest_ble_mac,
+            closest_ble_distance: p.closest_ble_distance,
+          };
         });
 
         renderTagList();
+        highlightCard(selectedTag);
       }
 
-      // Initial run
-      fetchData(); // ✅ Run once on load
-      setInterval(fetchData, 1000); // 🔁 Then every second
-      requestAnimationFrame(draw); // 🌀 Start the draw loop
+      function renderTagList() {
+        const list = document.getElementById("tag-list");
+        list.querySelectorAll(".tag-card").forEach((e) => e.remove());
+        Object.entries(tags).forEach(([id, t]) => {
+          const div = document.createElement("div");
+          div.className = "tag-card";
+          div.dataset.id = id;
+          div.innerHTML = `
+            <div class="tag-id">${id}</div>
+            <div><span class="coord-label">X</span>: <span class="coord-value">${
+              t.x
+            }</span></div>
+            <div><span class="coord-label">Y</span>: <span class="coord-value">${
+              t.y
+            }</span></div>
+            <div><span class="coord-label">Z</span>: <span class="coord-value">${
+              t.z
+            }</span></div>
+            <div style="margin-top:8px; font-size:12px; color:#777;">
+              📡 Closest WiFi: <b>${t.closest_wifi_mac || "N/A"}</b><br>
+              📏 WiFi Distance: ${t.closest_wifi_distance ?? "?"} m<br>
+              🛰️ Closest BLE: <b>${t.closest_ble_mac || "N/A"}</b><br>
+              📏 BLE Distance: ${t.closest_ble_distance ?? "?"} m
+            </div>
+          `;
+          div.onclick = () => {
+            selectedTag = id;
+            focusOnTag(id);
+            showTooltip(id, t);
+            highlightCard(id);
+          };
+          list.insertBefore(div, document.getElementById("reset-button"));
+        });
+      }
+
+      // Start
+      fetchData();
+      setInterval(fetchData, 1000);
+      requestAnimationFrame(draw);
     </script>
   </body>
 </html>

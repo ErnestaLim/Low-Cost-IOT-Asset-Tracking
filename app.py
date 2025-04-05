@@ -3,7 +3,7 @@ from flask import Flask, render_template, Response, jsonify
 from threading import Thread
 import time
 # from mqtt.client import start_mqtt, position_queue  # import shared queue
-from mqtt.simulator import simulate_dummy_data, position_queue
+from mqtt.simulator import simulate_dummy_data, position_queue, wifi_positions
 from mqtt.simulator import get_beacon_positions
 
 app = Flask(__name__)
@@ -33,6 +33,11 @@ def get_positions():
 @app.route("/beacons")
 def beacons():
     return jsonify(get_beacon_positions())
+
+
+@app.route('/wifi')
+def get_wifi():
+    return jsonify(wifi_positions)
 
 
 if __name__ == "__main__":

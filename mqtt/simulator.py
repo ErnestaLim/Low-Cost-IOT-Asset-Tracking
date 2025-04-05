@@ -9,8 +9,34 @@ beacon_positions = {
     "BEACON1": (0, 0, 0),
     "BEACON2": (1, 0, 0),
     "BEACON3": (0, 1, 0),
-    "BEACON4": (0.5, 0.5, 1)
+    "BEACON4": (0.5, 0.5, 0)
 }
+
+# Dummy MAC addresses for simulation
+BLE_MACS = {
+    "BEACON1": "AA:BB:CC:DD:EE:01",
+    "BEACON2": "AA:BB:CC:DD:EE:02",
+    "BEACON3": "AA:BB:CC:DD:EE:03",
+    "BEACON4": "AA:BB:CC:DD:EE:04"
+}
+
+WIFI_MACS = {
+    "WIFI1": "11:22:33:44:55:01",
+    "WIFI2": "11:22:33:44:55:02",
+    "WIFI3": "11:22:33:44:55:03",
+    "WIFI4": "11:22:33:44:55:04"
+}
+
+wifi_positions = {
+    "WIFI1": (0.8, 1, 0),
+    "WIFI2": (0.9, 0, 0),
+    "WIFI3": (0, 1.2, 0),
+    "WIFI4": (0.2, 0.7, 0)
+}
+
+
+def calculate_distance(p1, p2):
+    return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2 + (p1[2] - p2[2])**2)
 
 
 def trilateration(beacon_positions, distances):
@@ -43,53 +69,46 @@ def trilateration(beacon_positions, distances):
 
 def simulate_dummy_data():
     while True:
-        rssi_data = {
-            "BEACON1": 0.7,
-            "BEACON2": 0.7,
-            "BEACON3": 0.7,
-            "BEACON4": 1.0
-        }
+        tags = [
+            {"id": "TAG1", "x": 0.1, "y": 0.2, "z": 3},
+            {"id": "TAG2", "x": 0.25, "y": 0.42, "z": 4},
+            {"id": "TAG3", "x": 0.69, "y": 0.42, "z": 2},
+            {"id": "TAG4", "x": 0.8, "y": 0.7, "z": 3}
+        ]
 
-        tag_position = trilateration(beacon_positions, rssi_data)
-        if tag_position is not None:
-            x, y, z = tag_position
-            # position_queue.put(
-            #     {"x": round(x, 2), "y": round(y, 2), "z": round(z, 2)}
-            # )
+        for tag in tags:
+            # 🧠 Correct calculation for BLE distance
+            ble_actual_distances = {}
+            for ble_id, ble_pos in beacon_positions.items():
+                dist = calculate_distance(
+                    (tag["x"], tag["y"], tag["z"]), ble_pos)
+                ble_actual_distances[ble_id] = dist
 
-            position_queue.put(
-                {
-                    "id": "TAG1",
-                    "x": 0.2,
-                    "y": 0.3,
-                    "z": 5
-                },
-            )
-            position_queue.put(
-                {
-                    "id": "TAG2",
-                    "x": 0.25,
-                    "y": 0.42,
-                    "z": 4
-                },
-            )
-            position_queue.put(
-                {
-                    "id": "TAG3",
-                    "x": 0.69,
-                    "y": 0.42,
-                    "z": 2
-                },
-            )
-            position_queue.put(
-                {
-                    "id": "TAG4",
-                    "x": 0.8,
-                    "y": 0.7,
-                    "z": 3
-                },
-            )
-        time.sleep(1)  # simulate 1 reading per second
+            # 🧠 Correct calculation for WiFi distance
+            wifi_actual_distances = {}
+            for wifi_id, wifi_pos in wifi_positions.items():
+                dist = calculate_distance(
+                    (tag["x"], tag["y"], tag["z"]), wifi_pos)
+                wifi_actual_distances[wifi_id] = dist
+
+            # Find closest WiFi and BLE
+            closest_wifi = min(
+                wifi_actual_distances.items(), key=lambda x: x[1])
+            closest_ble = min(ble_actual_distances.items(), key=lambda x: x[1])
+
+            # Put into queue
+            position_queue.put({
+                "id": tag["id"],
+                "x": tag["x"],
+                "y": tag["y"],
+                "z": tag["z"],
+                "closest_wifi_mac": closest_wifi[0],
+                "closest_wifi_distance": round(closest_wifi[1], 2),
+                "closest_ble_mac": closest_ble[0],
+                "closest_ble_distance": round(closest_ble[1], 2)
+            })
+
+        time.sleep(1)
 
 
 def get_beacon_positions():
