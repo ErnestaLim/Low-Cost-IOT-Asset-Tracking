@@ -11,22 +11,66 @@
 #include "mbedtls/sha256.h"
 #include <ArduinoJson.h>
 
-// BLE Settings
-#define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b" // Same for both tags
-#define DEVICE_NAME "TAG" // Change to "TAG2" for the second tag
-const char* beaconSSID = "BeaconNetwork";
+// === CONFIGURATIONS ===
+const char* targetSSID = "BeaconNetwork";  // WiFi SSID to look for
+const char* TAG_NAME = "TAG";          // Unique tag identifier
+const int scanInterval = 1000;             // ms between scans
 
-WiFiClient espClient;
+// === BLE UUIDs ===
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
 BLEServer *pServer;
 BLEAdvertising *pAdvertising;
+BLEScan* pBLEScan;
 
-void setup() {
-  M5.begin();
-  M5.Lcd.setRotation(3);
-  M5.Lcd.fillScreen(BLACK);
-  M5.Lcd.setTextSize(2);
-  M5.Lcd.printf("%s", DEVICE_NAME);
+static BLEAdvertisedDevice* myDevice;
+static BLERemoteCharacteristic* pRemoteCharacteristic;
+static boolean doConnect = false;
+static boolean connected = false;
+static BLEClient*  pClient;
+
+class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
+  void onResult(BLEAdvertisedDevice advertisedDevice) {
+    if (advertisedDevice.isAdvertisingService(BLEUUID(SERVICE_UUID))) {
+      Serial.println("Found a beacon, will try to connect.");
+      BLEDevice::getScan()->stop();  // Stop scanning
+      myDevice = new BLEAdvertisedDevice(advertisedDevice);
+      doConnect = true;
+    }
+  }
+};
+
+bool connectToServer() {
+  Serial.println("Connecting to BLE Server...");
+  pClient = BLEDevice::createClient();
+  pClient->connect(myDevice);  // Connect to the server
+
+  BLERemoteService* pRemoteService = pClient->getService(SERVICE_UUID);
+  if (pRemoteService == nullptr) {
+    Serial.println("Failed to find service.");
+    return false;
+  }
+
+  pRemoteCharacteristic = pRemoteService->getCharacteristic(CHARACTERISTIC_UUID);
+  if (pRemoteCharacteristic == nullptr) {
+    Serial.println("Failed to find characteristic.");
+    return false;
+  }
+
+  connected = true;
+  return true;
+}
+
+void sendJsonToBeacon(String jsonStr) {
+  if (connected && pRemoteCharacteristic->canWrite()) {
+    pRemoteCharacteristic->writeValue(jsonStr.c_str(), jsonStr.length());
+    Serial.println("Sent JSON via BLE.");
+  } else {
+    Serial.println("Not connected or cannot write.");
+  }
+}
+
 
 
 // === SHA256 Hash Function ===
@@ -80,26 +124,51 @@ void setupBLE() {
   BLEService *pService = pServer->createService(SERVICE_UUID);
   pService->start();
 
-  // Advertise with service UUID
-  pAdvertising = pServer->getAdvertising();
+  pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->start();
 
-  // Set advertising interval - each unit is 0.625nanosecond
-  pAdvertising->setMinInterval(0x640); // 1second
-  pAdvertising->setMaxInterval(0x640); // 1second
+  Serial.println("BLE advertising started.");
 }
 
-void loop(){
-  WiFi.scanNetworks(true, false, false, 20, 1,beaconSSID);
-  int numNetworks = WiFi.scanComplete();
-    for (int i = 0; i < numNetworks; i++) {
-        String macAddr = WiFi.BSSIDstr(i);  // Get the MAC address
-        int rssi = WiFi.RSSI(i);            // Get RSSI value
-        Serial.print("Beacon found - MAC: ");
-        Serial.print(macAddr);
-        Serial.print(" RSSI: ");
-        Serial.println(rssi);
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true);
+  M5.begin();
+  M5.Lcd.setRotation(3);
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.printf("%s", TAG_NAME);
+  delay(100);
+
+  setupBLE();
+  pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks(), true);
+  pBLEScan->setActiveScan(true);
+}
+
+void loop() {
+  String hash = scanWiFi();
+  if (!hash.isEmpty()) {
+    Serial.println("Hashed Data: " + hash);
+    if (!connected) {
+      Serial.println("scanning");
+      pBLEScan->start(2, false); // non-blocking scan
     }
-    
+    if (doConnect) {
+      if (connectToServer()) {
+        Serial.println("Connected to server!");
+      } else {
+        Serial.println("Failed to connect.");
+      }
+      doConnect = false;
+    }
+
+    if (connected && pRemoteCharacteristic != nullptr) {
+      sendJsonToBeacon(hash);
+    }
+  }
+
+  delay(scanInterval);
 }
