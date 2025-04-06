@@ -1,119 +1,137 @@
+# client.py
 import paho.mqtt.client as mqtt
 import numpy as np
+from queue import Queue
+from scipy.optimize import least_squares
+
+# === Shared Queue to send data to Flask ===
+position_queue = Queue()
 
 # MQTT Settings
-BROKER = "192.168.20.175"
-TOPICS = ["BEACON1", "BEACON2", "BEACON3", "BEACON4"]
-TAG_TOPIC = "TAG_POSITION"
+BROKER = "192.168.137.1"
+TOPICS = ["BLE", "WIFI"]
 
-# Predefined beacon positions (x, y, z)
-beacon_positions = {
+# === Separated beacon positions ===
+BLE_POSITIONS = {
     "BEACON1": (0, 0, 0),
-    "BEACON2": (1, 0, 0),
-    "BEACON3": (0, 1, 0),
-    "BEACON4": (0.5, 0.5, 1) 
+    "BEACON2": (5, 0, 0),
+    "BEACON3": (0, 5, 0),
+    "BEACON4": (2.5, 2.5, 3)
 }
 
-# Dictionary to store distances
-rssi_data = {beacon: {} for beacon in beacon_positions}
+WIFI_POSITIONS = {
+    "WIFI1": (0, 0, 0),
+    "WIFI2": (5, 0, 0),
+    "WIFI3": (0, 5, 0),
+    "WIFI4": (2.5, 2.5, 3)
+}
 
+TAG_MACS = {
+    "BLE_PRED": "D4:D4:DA:85:31:2A",
+    "WIFI_PRED": "D4:D4:DA:85:31:28"
+}
 
-def trilateration(beacon_positions, distances):
-    if len(distances) < 4:
-        print("Not enough beacons for 3D trilateration")
-        return None  # Need at least four distances
+BLE_MACS = {
+    "BEACON1": "4C:75:25:CB:9B:25",
+    "BEACON2": "AC:0B:FB:6F:9E:89",
+    "BEACON3": "4C:75:25:CB:8D:55",
+    "BEACON4": "4C:75:25:CB:81:79"
+}
 
-    # Extract positions and distances
-    (x1, y1, z1), d1 = beacon_positions["BEACON1"], distances["BEACON1"]
-    (x2, y2, z2), d2 = beacon_positions["BEACON2"], distances["BEACON2"]
-    (x3, y3, z3), d3 = beacon_positions["BEACON3"], distances["BEACON3"]
-    (x4, y4, z4), d4 = beacon_positions["BEACON4"], distances["BEACON4"]
+WIFI_MACS = {
+    "WIFI1": "4C:75:25:CB:9B:25",
+    "WIFI2": "AC:0B:FB:6F:9E:89",
+    "WIFI3": "4C:75:25:CB:8D:55",
+    "WIFI4": "4C:75:25:CB:81:79"
+}
 
-    print(f"BEACON1: ({x1}, {y1}, {z1}), Distance={d1}")
-    print(f"BEACON2: ({x2}, {y2}, {z2}), Distance={d2}")
-    print(f"BEACON3: ({x3}, {y3}, {z3}), Distance={d3}")
-    print(f"BEACON4: ({x4}, {y4}, {z4}), Distance={d4}")
+# === Separate data stores for BLE/WIFI ===
+ble_rssi = {beacon: {} for beacon in BLE_MACS}
+wifi_rssi = {beacon: {} for beacon in WIFI_MACS}
 
-    # Constructing system of equations for 3D trilateration
-    A = np.array([
-        [2 * (x2 - x1), 2 * (y2 - y1), 2 * (z2 - z1)],
-        [2 * (x3 - x1), 2 * (y3 - y1), 2 * (z3 - z1)],
-        [2 * (x4 - x1), 2 * (y4 - y1), 2 * (z4 - z1)]
-    ])
+def trilateration(positions, distances):
+    def objective_function(point):
+        return [np.linalg.norm(np.array(point) - np.array(pos)) - dist
+               for pos, dist in zip(positions.values(), distances.values())]
+    
+    # Initial guess (centroid of beacons)
+    initial_guess = np.mean(list(positions.values()), axis=0)
+    
+    # Set bounds based on your environment dimensions
+    bounds = ([0, 0, 0], [5, 5, 3])  # Adjust based on your space
+    
+    result = least_squares(objective_function, 
+                          initial_guess, 
+                          bounds=bounds,
+                          method='trf',
+                          ftol=1e-4,
+                          xtol=1e-6)
+    
+    return result.x.tolist() if result.success else None
 
-    B = np.array([
-        [d1**2 - d2**2 - x1**2 + x2**2 - y1**2 + y2**2 - z1**2 + z2**2],
-        [d1**2 - d3**2 - x1**2 + x3**2 - y1**2 + y3**2 - z1**2 + z3**2],
-        [d1**2 - d4**2 - x1**2 + x4**2 - y1**2 + y4**2 - z1**2 + z4**2]
-    ])
-
-    try:
-        position = np.linalg.lstsq(A, B, rcond=None)[0]
-        x, y, z = position.flatten()
-        return [x, y, z]
-    except np.linalg.LinAlgError:
-        return None
-
-
-# def averaged_distances():
-#     """Compute relative positions for BEACON2, BEACON3, and BEACON4."""
-#     avg_dist = (rssi_data["BEACON1"]["BEACON2"] + rssi_data["BEACON2"]["BEACON1"]) / 2
-#     beacon_positions["BEACON2"] = (avg_dist, 0, 0)
-
-#     avg_dist = (rssi_data["BEACON1"]["BEACON3"] + rssi_data["BEACON3"]["BEACON1"]) / 2
-#     beacon_positions["BEACON3"] = (0, avg_dist, 0)
-
-
-def print_beacon_positions():
-    """Prints the current beacon positions."""
-    print("Current Beacon Positions:")
-    for beacon, position in beacon_positions.items():
-        print(f"  {beacon}: X={position[0]:.2f}, Y={position[1]:.2f}, Z={position[2]:.2f}")
 
 
 def on_message(client, userdata, msg):
-    """
-    Handles incoming MQTT messages.
-    Parses distances and computes the tag's position when sufficient data is collected.
-    """
     payload = msg.payload.decode()
-
     try:
         source = msg.topic
-        target, distance = payload.split(":")
+        beacon_mac, tag_mac, distance = payload.split(",")
         distance = float(distance)
-        
-        if source in rssi_data:
-            rssi_data[source][target] = distance
 
-        # Check if all beacon-to-beacon distances are available
-        # if all(beacon in rssi_data["BEACON1"] for beacon in ["BEACON2", "BEACON3", "BEACON4"]):
-        #     averaged_distances()
+        beacon_mac = beacon_mac.strip().upper()
+        tag_mac = tag_mac.strip().upper()
 
-            # If all beacons have distance to TAG, compute position
-        if all("TAG" in rssi_data[b] for b in beacon_positions):
-            tag_distances = {b: rssi_data[b]["TAG"] for b in beacon_positions if "TAG" in rssi_data[b]}
-            tag_position = trilateration(beacon_positions, tag_distances)
+        # === Separate processing for BLE/WIFI ===
+        if source == "BLE":
+            for bid, bmac in BLE_MACS.items():
+                if beacon_mac == bmac.strip().upper():
+                    ble_rssi[bid][tag_mac] = distance
+                    if sum(tag_mac in ble_rssi[b] for b in BLE_MACS) >= 4:
+                        distances = {b: ble_rssi[b][tag_mac] for b in BLE_MACS}
+                        position = trilateration(BLE_POSITIONS, distances)
+                        handle_position(tag_mac, position, distances, "BLE")
+                    return
 
-            if tag_position:
-                x, y, z = tag_position
-                print_beacon_positions()
-                print(f"Estimated Tag Position: X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
-                # client.publish(TAG_TOPIC, f"{x:.2f},{y:.2f},{z:.2f}")
+        elif source == "WIFI":
+            for wid, wmac in WIFI_MACS.items():
+                if beacon_mac == wmac.strip().upper():
+                    wifi_rssi[wid][tag_mac] = distance
+                    if sum(tag_mac in wifi_rssi[w] for w in WIFI_MACS) >= 4:
+                        distances = {w: wifi_rssi[w][tag_mac] for w in WIFI_MACS}
+                        position = trilateration(WIFI_POSITIONS, distances)
+                        handle_position(tag_mac, position, distances, "WIFI")
+                    return
 
-    except ValueError:
-        print("Invalid message format.")
+        print(f"Unknown {source} beacon: {beacon_mac}")
 
-def main():
+    except Exception as e:
+        print(f"Error processing message: {e}")
+
+# client.py
+def handle_position(tag_mac, position, distances, tech):
+    if position is None:
+        return
+
+    x, y, z = round(position[0], 2), round(position[1], 2), round(position[2], 2)
+    closest = min(distances.items(), key=lambda x: x[1])
+    
+    # Store tech-specific data
+    update_data = {
+        "id": tag_mac,
+        "x": x,
+        "y": y,
+        "z": z,
+        f"closest_{tech.lower()}_mac": closest[0],
+        f"closest_{tech.lower()}_distance": round(closest[1], 2)
+    }
+    
+    position_queue.put(update_data)
+
+
+def start_mqtt():
     client = mqtt.Client()
     client.on_message = on_message
     client.connect(BROKER, 1883, 60)
-
     for topic in TOPICS:
         client.subscribe(topic)
-
     client.loop_forever()
-
-
-if __name__ == "__main__":
-    main()

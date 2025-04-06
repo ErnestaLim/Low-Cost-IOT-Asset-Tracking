@@ -10,6 +10,8 @@
 #include <BLEAdvertisedDevice.h>
 #include "mbedtls/sha256.h"
 #include <ArduinoJson.h>
+#include <esp_gap_ble_api.h>  // for esp_ble_gap_set_security_param
+#include <esp_bt_defs.h>
 
 // === CONFIGURATIONS ===
 const char* targetSSID = "BeaconNetwork";  // WiFi SSID to look for
@@ -71,7 +73,97 @@ void sendJsonToBeacon(String jsonStr) {
   }
 }
 
+class MySecurityCallbacks : public BLESecurityCallbacks {
+  void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) {
+    if (cmpl.success) {
+      Serial.println("Authentication completed.");
+      // Check for security status, e.g., auth_mode
+      if (cmpl.auth_mode & ESP_LE_AUTH_REQ_SC_ONLY ) {
+        Serial.println("SC Authenticated.");
+      } else {
+        Serial.print("Authentication mode: ");
+        Serial.println(cmpl.auth_mode);
+        pClient->disconnect();
+      }
+    } else {
+      Serial.println("Authentication failed.");
+      pClient->disconnect();
+    }
+  }
+    uint32_t onPassKeyRequest() override {
+    Serial.println("Passkey requested.");
+    return 123456;
+  }
 
+  // Passkey notify callback
+  void onPassKeyNotify(uint32_t pass_key) override {
+    Serial.print("Passkey received: ");
+    Serial.println(pass_key);
+  }
+
+  // Security request callback
+  bool onSecurityRequest() override {
+    Serial.println("Security request received.");
+    return true;  // Allow pairing
+  }
+
+  // PIN confirmation callback
+  bool onConfirmPIN(uint32_t pin) override {
+    Serial.print("Confirm PIN: ");
+    Serial.println(pin);
+    return true;  // Accept the PIN (you can add logic to reject specific PINs)
+  }
+  
+};
+
+bool connectToServer() {
+  Serial.println("Connecting to BLE Server...");
+  if (!pClient) {
+    pClient = BLEDevice::createClient();
+  }
+  pClient->connect(myDevice);  // Connect to the server
+  esp_err_t err = esp_ble_set_encryption((uint8_t*)pClient->getPeerAddress().getNative(), ESP_BLE_SEC_ENCRYPT_MITM);
+  esp_ble_auth_req_t auth_req = ESP_LE_AUTH_REQ_SC_MITM_BOND;
+  esp_ble_io_cap_t iocap = ESP_IO_CAP_IN;
+  uint8_t key_size = 16; // 16-byte encryption key
+
+  esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(uint8_t));
+  esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t));
+  esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(uint8_t));
+
+  esp_ble_set_encryption(*(pClient->getPeerAddress().getNative()), ESP_BLE_SEC_ENCRYPT_MITM);
+
+  if (!pClient->isConnected()) {
+    Serial.println("Failed to connect.");
+    return false;
+  }
+  BLERemoteService* pRemoteService = pClient->getService(SERVICE_UUID);
+  if (pRemoteService == nullptr) {
+    Serial.println("Failed to find service.");
+    return false;
+  }
+
+  pRemoteCharacteristic = pRemoteService->getCharacteristic(CHARACTERISTIC_UUID);
+  if (pRemoteCharacteristic == nullptr) {
+    Serial.println("Failed to find characteristic.");
+    return false;
+  }
+  connected = true;
+  return true;
+}
+
+void sendJsonToBeacon(String jsonStr) {
+  if (connected && pRemoteCharacteristic->canWrite()) {
+    pRemoteCharacteristic->writeValue(jsonStr.c_str(), jsonStr.length());
+    Serial.println("Sent JSON via BLE.");
+  } else {
+    Serial.println("Not connected or cannot write.");
+  }
+}
+
+String getWiFiMAC() {
+    return WiFi.macAddress();
+}
 
 // === SHA256 Hash Function ===
 String sha256(const String& input) {
@@ -93,6 +185,7 @@ String sha256(const String& input) {
 // === WiFi Scan Function ===
 String scanWiFi() {
   DynamicJsonDocument doc(1024);
+  doc["tag_mac"] = getWiFiMAC().c_str();
   JsonArray arr = doc.createNestedArray("wifi_data");
 
   int n = WiFi.scanNetworks(false, true);
@@ -110,7 +203,6 @@ String scanWiFi() {
   }
   String payload;
   serializeJson(doc, payload);
-  Serial.println("WiFi JSON Payload: " + payload);
   doc["signature"] = sha256(payload);
   String payloadwithhash;
   serializeJson(doc, payloadwithhash);
@@ -120,6 +212,16 @@ String scanWiFi() {
 // === BLE Setup ===
 void setupBLE() {
   BLEDevice::init(TAG_NAME);
+  // Client-side GAP security config
+  BLESecurity *pSecurity = new BLESecurity();
+  pSecurity->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND); // Bonding + MITM + Secure Conn
+  pSecurity->setCapability(ESP_IO_CAP_IN);  // Display onlya
+  // pSecurity->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+  pSecurity->setKeySize(16);
+  // pSecurity->setStaticPIN(123456); 
+  
+  BLEDevice::setSecurityCallbacks(new MySecurityCallbacks());
+  
   pServer = BLEDevice::createServer();
   BLEService *pService = pServer->createService(SERVICE_UUID);
   pService->start();
@@ -166,6 +268,11 @@ void loop() {
     }
 
     if (connected && pRemoteCharacteristic != nullptr) {
+      if (!pClient->isConnected()) {
+        Serial.println("BLE connection lost. Attempting to reconnect...");
+        connected = false;
+        doConnect = true;
+      }
       sendJsonToBeacon(hash);
     }
   }
