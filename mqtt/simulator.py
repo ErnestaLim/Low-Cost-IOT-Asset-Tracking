@@ -1,43 +1,31 @@
-# mqtt/simulator.py
+import paho.mqtt.client as mqtt
 import numpy as np
 import time
 from queue import Queue
 
 position_queue = Queue()
 
+BROKER = "192.168.137.1"
+TOPICS = ["BLE", "WIFI"]
+
 beacon_positions = {
     "BEACON1": (0, 0, 0),
-    "BEACON2": (1, 0, 0),
-    "BEACON3": (0, 1, 0),
-    "BEACON4": (0.5, 0.5, 0)
-}
-
-# Dummy MAC addresses for simulation
-BLE_MACS = {
-    "BEACON1": "AA:BB:CC:DD:EE:01",
-    "BEACON2": "AA:BB:CC:DD:EE:02",
-    "BEACON3": "AA:BB:CC:DD:EE:03",
-    "BEACON4": "AA:BB:CC:DD:EE:04"
-}
-
-WIFI_MACS = {
-    "WIFI1": "11:22:33:44:55:01",
-    "WIFI2": "11:22:33:44:55:02",
-    "WIFI3": "11:22:33:44:55:03",
-    "WIFI4": "11:22:33:44:55:04"
+    "BEACON2": (5, 0, 0),
+    "BEACON3": (0, 5, 0),
+    "BEACON4": (2.5, 2.5, 0)
 }
 
 wifi_positions = {
-    "WIFI1": (0.8, 1, 0),
-    "WIFI2": (0.9, 0, 0),
-    "WIFI3": (0, 1.2, 0),
-    "WIFI4": (0.2, 0.7, 0)
+    "WIFI1": (0, 0, 0),
+    "WIFI2": (5, 0, 0),
+    "WIFI3": (0, 5, 0),
+    "WIFI4": (2.5, 2.5, 0)
 }
 
+rssi_data = {b: {} for b in beacon_positions}
 
 def calculate_distance(p1, p2):
     return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2 + (p1[2] - p2[2])**2)
-
 
 def trilateration(beacon_positions, distances):
     if len(distances) < 4:
@@ -65,16 +53,9 @@ def trilateration(beacon_positions, distances):
         return position.flatten()
     except np.linalg.LinAlgError:
         return None
-
-
-def simulate_dummy_data():
+def handle_mqtt_position_updates():
     while True:
-        tags = [
-            {"id": "TAG1", "x": 0.1, "y": 0.2, "z": 3},
-            {"id": "TAG2", "x": 0.25, "y": 0.42, "z": 4},
-            {"id": "TAG3", "x": 0.69, "y": 0.42, "z": 2},
-            {"id": "TAG4", "x": 0.8, "y": 0.7, "z": 3}
-        ]
+        tags = []
 
         for tag in tags:
             # 🧠 Correct calculation for BLE distance
@@ -109,7 +90,6 @@ def simulate_dummy_data():
             })
 
         time.sleep(1)
-
 
 def get_beacon_positions():
     return beacon_positions

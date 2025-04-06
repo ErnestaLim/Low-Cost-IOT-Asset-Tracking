@@ -321,14 +321,14 @@
         }
 
         // Draw WiFi beacons
-        ctx.fillStyle = "#9b59b6";
-        for (const [id, b] of Object.entries(wifiPositions)) {
-          const { x, y } = worldToCanvas(b[0], b[1]);
-          ctx.beginPath();
-          ctx.arc(x, y, 5, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.fillText(id, x + 8, y - 8);
-        }
+        // ctx.fillStyle = "#9b59b6";
+        // for (const [id, b] of Object.entries(wifiPositions)) {
+        //   const { x, y } = worldToCanvas(b[0], b[1]);
+        //   ctx.beginPath();
+        //   ctx.arc(x, y, 5, 0, 2 * Math.PI);
+        //   ctx.fill();
+        //   ctx.fillText(id, x + 8, y - 8);
+        // }
 
         // Draw tags
         for (const [id, t] of Object.entries(tags)) {
@@ -405,13 +405,13 @@
 
         data.forEach((p) => {
           tags[p.id] = {
-            x: p.x,
-            y: p.y,
-            z: p.z,
-            closest_wifi_mac: p.closest_wifi_mac,
-            closest_wifi_distance: p.closest_wifi_distance,
-            closest_ble_mac: p.closest_ble_mac,
-            closest_ble_distance: p.closest_ble_distance,
+              x: p.x || 0,
+              y: p.y || 0,
+              z: p.z || 0,
+              closest_wifi_mac: p.closest_wifi_mac || "N/A",
+              closest_wifi_distance: p.closest_wifi_distance || 0,
+              closest_ble_mac: p.closest_ble_mac || "N/A",
+              closest_ble_distance: p.closest_ble_distance || 0
           };
         });
 
