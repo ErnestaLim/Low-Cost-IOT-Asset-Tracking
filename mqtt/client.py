@@ -8,7 +8,7 @@ from scipy.optimize import least_squares
 position_queue = Queue()
 
 # MQTT Settings
-BROKER = "192.168.137.1"
+BROKER = "192.168.20.175"
 TOPICS = ["BLE", "WIFI"]
 
 # === Separated beacon positions ===
@@ -131,7 +131,9 @@ def handle_position(tag_mac, position, distances, tech):
 def start_mqtt():
     client = mqtt.Client()
     client.on_message = on_message
-    client.connect(BROKER, 1883, 60)
+    client.tls_set(ca_certs="C:/Documents/IoT/Low-Cost-IOT-Asset-Tracking/mqtt/ca.crt")  # Path to CA certificate
+    client.username_pw_set("beacon", "securepassword")
+    client.connect("192.168.20.175", 8883, 60)
     for topic in TOPICS:
         client.subscribe(topic)
     client.loop_forever()

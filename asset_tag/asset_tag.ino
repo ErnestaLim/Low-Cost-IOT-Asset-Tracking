@@ -13,6 +13,7 @@
 #include <esp_gap_ble_api.h>  // for esp_ble_gap_set_security_param
 #include <esp_bt_defs.h>
 
+
 // === CONFIGURATIONS ===
 const char* targetSSID = "BeaconNetwork";  // WiFi SSID to look for
 const char* TAG_NAME = "TAG";          // Unique tag identifier
@@ -42,36 +43,6 @@ class MyAdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
     }
   }
 };
-
-bool connectToServer() {
-  Serial.println("Connecting to BLE Server...");
-  pClient = BLEDevice::createClient();
-  pClient->connect(myDevice);  // Connect to the server
-
-  BLERemoteService* pRemoteService = pClient->getService(SERVICE_UUID);
-  if (pRemoteService == nullptr) {
-    Serial.println("Failed to find service.");
-    return false;
-  }
-
-  pRemoteCharacteristic = pRemoteService->getCharacteristic(CHARACTERISTIC_UUID);
-  if (pRemoteCharacteristic == nullptr) {
-    Serial.println("Failed to find characteristic.");
-    return false;
-  }
-
-  connected = true;
-  return true;
-}
-
-void sendJsonToBeacon(String jsonStr) {
-  if (connected && pRemoteCharacteristic->canWrite()) {
-    pRemoteCharacteristic->writeValue(jsonStr.c_str(), jsonStr.length());
-    Serial.println("Sent JSON via BLE.");
-  } else {
-    Serial.println("Not connected or cannot write.");
-  }
-}
 
 class MySecurityCallbacks : public BLESecurityCallbacks {
   void onAuthenticationComplete(esp_ble_auth_cmpl_t cmpl) {
